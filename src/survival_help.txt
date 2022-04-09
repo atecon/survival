@@ -1,0 +1,68 @@
+This package is supposed to become a collection of methods applicable to survival data. It currently includes the non-parametric Kaplan-Meier estimator.
+
+Please report bugs or comments on the gretl mailing list or write to atecon@posteo.de. You can also create pull requests to:
+https://github.com/atecon/survival
+
+
+
+================
+PUBLIC FUNCTIONS
+================
+
+kaplanmeier(const series y, const series censored)
+==================================================================
+Function executing the Kaplan-Meier estimator. The variance is computed via Greenwood's (1926) approximation.
+
+Input parameters
+    y:            series, Endogenous holding observed survival times
+    censored:     series, Boolean being unity if i-th subject was right
+                  censored, otherwise zero
+
+
+Return: Bundle holding various information:
+
+    ci_level:        scalar, width of the confidence interval
+    lower:           matrix, Tx1 vector of the lower bound confidence interval
+                     to either an event (failed subjects) or censoring
+    n_events_at_t:   matrix, Tx1 vector referring to the number of failed
+                     subjects (without censored ones) at time t
+    n_subjects_at_t: matrix, Tx1 vector referring to the number of subjects at
+                     risk (after censoring) at time t
+    periods:         matrix, Tx1 vector of sorted distinct periods each
+                     referring time t
+    stderror:        matrix, Tx1 vector of estimated standard error of the
+                     survivor function at time t
+    survival:        matrix, Tx1 vector of estimated survival probabilities at
+    upper:           matrix, Tx1 vector of the upper bound confidence interval
+    variance:        matrix, Tx1 vector of estimated standard variance at time t
+
+
+print_kaplanmeier(const bundle model)
+==================================================================
+Print estimation results for each time period t.
+
+Input parameters
+    model:        bundle, Bundle holding estimation results as returned by the
+                  kaplanmeier() function call
+
+Return: Nothing
+
+
+plot_kaplanmeier(const bundle model, const bundle opts)
+==================================================================
+Print estimation results for each time period t.
+
+Input parameters
+    model:        bundle, Bundle holding estimation results as returned by the
+                  kaplanmeier() function call
+    opts:         bundle, Optional arguments passed for tweaking or storing the
+                  compiled plot. The supported arguments currently are:
+                  - filename: Specify full path plus filename for storing plot
+
+Return: Nothing
+
+
+Changelog:
+==========
+v0.1 (April 2022):
+  - initial version
