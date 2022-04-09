@@ -19,16 +19,13 @@ function bundle get_basics (const series y)
     bundle self
 
     scalar self.ci_level = 0.95          # width confidence interval
-    matrix self.periods = values(y)      # Distinct time points at which are events
-    matrix self.survival = mshape(NA, nelem(self.periods), 1) # estimate of survival prob. at time t+0
-    matrix self.n_events_at_t = mshape(NA, nelem(self.periods), 1) # the number of events that occur at time t
-    matrix self.n_subjects_at_t = nobs(y) | mshape(NA, nelem(self.periods) - 1, 1) # number of subjects for each group at time t
-    matrix self.time = {}                # the time points at which the curve has a step
-
-    matrix self.censor = {}
-    /* for counting process data only, the number of subjects who exit the risk set, with-
-out an event, at time t. (For right censored data, this number can be computed
-from the successive values of the number at risk).*/
+    matrix self.periods = values(y) # Distinct time points at which are events
+    # estimate of survival prob. at time t+0
+    matrix self.survival = mshape(NA, nelem(self.periods), 1)
+    # the number of events that occur at time t
+    matrix self.n_events_at_t = mshape(NA, nelem(self.periods), 1)
+    # number of subjects for each group at time t
+    matrix self.n_subjects_at_t = nobs(y) | mshape(NA, nelem(self.periods) - 1, 1)
 
     return self
 end function
@@ -44,6 +41,8 @@ function bundle kaplanmeier (series y "survival time",
     list L = index y censored
     smpl L --no-missing
 
+
+    # TODO: merge B and self
     bundle B = get_basics(y)
     list L = sort_by(L, inlist(L, y))
 
@@ -86,8 +85,6 @@ function bundle kaplanmeier (series y "survival time",
     B.n_events_at_t = {0} | B.n_events_at_t
     B.n_subjects_at_t = $nobs | B.n_subjects_at_t
     B.survival = {1} | B.survival
-
-
     greenwood_variance(&B)
 
     return B
@@ -99,9 +96,7 @@ function void greenwood_variance (bundle *self)
     https://en.wikipedia.org/wiki/Kaplan%E2%80%93Meier_estimator#Statistical_considerations
     return: scalar, Variance of the estimator */
 
-
     scalar critval = invcdf(n, self.ci_level)
-    #log_S = log(self.survival)
     self.variance = mshape(NA, rows(self.periods), 1)
     self.lower = mshape(NA, rows(self.periods), 1)
     self.upper = mshape(NA, rows(self.periods), 1)
@@ -114,6 +109,8 @@ function void greenwood_variance (bundle *self)
         scalar denominator += self.n_subjects_at_t[t] * \
                         (self.n_subjects_at_t[t] - self.n_events_at_t[t])
 
+        # TODO: Not fully sure about that formula -- looks to work without
+        # multiplication of "self.survival[t]^2"
         self.variance[t] =  nominator / denominator #* self.survival[t]^2
 
         scalar factor = sqrt(self.variance[t]) * critval
