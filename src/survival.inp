@@ -1,0 +1,115 @@
+function list sort_by (const list L, const int colpos[1::])
+    /* Sort 'L' by 'colpos'.
+    return: list, Series sorted by the i-th series of 'L' in ascending order */
+
+    list R
+
+    matrix M = {L}
+    M = msortby(M, colpos)
+    cnameset(M, varnames(L))
+    list R = mat2list(M)
+
+    return R
+end function
+
+
+function bundle get_basics (const series y)
+    /* Prepare basic bundle. */
+
+    bundle B
+
+    matrix B.periods = values(y)      # Distinct time points at which are events
+    matrix B.survival = mshape(NA, nelem(B.periods), 1) # estimate of survival prob. at time t+0
+    matrix B.n_events_at_t = mshape(NA, nelem(B.periods), 1) # the number of events that occur at time t
+    scalar B.n_subjects = nobs(y)     # number of subjects for each group
+    matrix B.time = {}                # the time points at which the curve has a step
+
+    matrix B.censor = {}
+    /* for counting process data only, the number of subjects who exit the risk set, with-
+out an event, at time t. (For right censored data, this number can be computed
+from the successive values of the number at risk).*/
+
+    return B
+end function
+
+
+function bundle kaplanmeier (series y "survival time",
+                             series censored "0: not censored, 1: right-censored",
+                             const series group[null] "Identifier for estimation by group",
+                             const bundle self[null] "Optional settings")
+    /* Kaplan-Meier estimator */
+
+    genr index
+    list L = index y censored
+    smpl L --no-missing
+
+    bundle B = get_basics(y)
+    list L = sort_by(L, inlist(L, y))
+
+
+    loop t=1..nelem(B.periods) # TODO
+        smpl y == B.periods[t] --restrict --replace
+        B.n_events_at_t[t] = nobs(y)
+
+        # Check whether at t all subjects are censored
+        scalar n_censored = sum(censored)
+        scalar all_censored = (n_censored == B.n_events_at_t[t])
+
+        if all_censored
+            # Do not count censored subjects anymore
+            B.n_subjects -= n_censored
+            continue   # TODO: requires gretl 2022b
+        endif
+
+        smpl censored == FALSE --restrict  # disregard censored subjects
+        B.n_events_at_t[t] = $nobs #nobs(y)      # update disregarding censored subjects
+
+        scalar q = 1 - B.n_events_at_t[t] / B.n_subjects
+
+        if t == 1
+            B.survival[t] = q
+        else
+            B.survival[t] = B.survival[t-1] * q
+        endif
+
+        B.n_subjects -= $nobs
+        # FIXME: B.n_subjects -= B.n_events_at_t[t] FAILS
+    endloop
+
+    B.periods = {0} | B.periods
+    B.survival = {1} | B.survival
+
+    return B
+end function
+
+
+
+function void plot_kaplanmeier (const bundle self,
+                                const bundle opts[null],
+                                string filename[null])
+    /* Plot Kaplan-Meier curves */
+
+    # TODO: allow tweaking the plot
+
+    matrix M = self.survival ~ self.periods
+    string xname = "Time"
+    string yname = "Survival probability"
+    string filename = exists(filename) ? filename : "output"
+
+    plot M
+           options with-steps fit=none
+           literal set linetype 1 lw 1.5 #lc rgb "green"
+           literal set nokey
+           # printf "set title \"%s\"", title
+           printf "set xlabel \"%s\"", xname
+           printf "set ylabel \"%s\"", yname
+           literal set grid
+           literal set yrange[-0.05:1.05]
+           literal set xrange[-0.5:]
+    end plot --output="@filename"
+end function
+
+
+
+
+

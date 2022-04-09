@@ -1,0 +1,23 @@
+clear
+set verbose off
+
+
+include "~/git/survival/src/survival.inp" --force
+
+EXAMPLE = 1
+
+if EXAMPLE == 1
+    open kennan --quiet
+    rename Ti y
+    series censored = 0
+elif EXAMPLE == 2
+    nulldata 6
+    series y = {1, 2, 3, 3, 5,7}'
+    series censored = {0,0,0,0,1,0}'
+endif
+
+bundle B = kaplanmeier(y, censored)
+B
+print B.survival[1:10]
+
+plot_kaplanmeier(B, null, "test.png")
