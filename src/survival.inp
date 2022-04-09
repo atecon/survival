@@ -16,20 +16,21 @@ end function
 function bundle get_basics (const series y)
     /* Prepare basic bundle. */
 
-    bundle B
+    bundle self
 
-    matrix B.periods = values(y)      # Distinct time points at which are events
-    matrix B.survival = mshape(NA, nelem(B.periods), 1) # estimate of survival prob. at time t+0
-    matrix B.n_events_at_t = mshape(NA, nelem(B.periods), 1) # the number of events that occur at time t
-    scalar B.n_subjects = nobs(y)     # number of subjects for each group
-    matrix B.time = {}                # the time points at which the curve has a step
+    scalar self.ci_level = 0.95          # width confidence interval
+    matrix self.periods = values(y)      # Distinct time points at which are events
+    matrix self.survival = mshape(NA, nelem(self.periods), 1) # estimate of survival prob. at time t+0
+    matrix self.n_events_at_t = mshape(NA, nelem(self.periods), 1) # the number of events that occur at time t
+    matrix self.n_subjects_at_t = nobs(y) | mshape(NA, nelem(self.periods) - 1, 1) # number of subjects for each group at time t
+    matrix self.time = {}                # the time points at which the curve has a step
 
-    matrix B.censor = {}
+    matrix self.censor = {}
     /* for counting process data only, the number of subjects who exit the risk set, with-
 out an event, at time t. (For right censored data, this number can be computed
 from the successive values of the number at risk).*/
 
-    return B
+    return self
 end function
 
 
@@ -46,8 +47,7 @@ function bundle kaplanmeier (series y "survival time",
     bundle B = get_basics(y)
     list L = sort_by(L, inlist(L, y))
 
-
-    loop t=1..nelem(B.periods) # TODO
+    loop t=1..nelem(B.periods)
         smpl y == B.periods[t] --restrict --replace
         B.n_events_at_t[t] = nobs(y)
 
@@ -57,55 +57,129 @@ function bundle kaplanmeier (series y "survival time",
 
         if all_censored
             # Do not count censored subjects anymore
-            B.n_subjects -= n_censored
+            B.n_subjects_at_t[t] -= B.n_events_at_t[t]
+            B.survival[t] = B.survival[t-1]
+            B.n_events_at_t[t] = 0
             continue   # TODO: requires gretl 2022b
         endif
 
         smpl censored == FALSE --restrict  # disregard censored subjects
-        B.n_events_at_t[t] = $nobs #nobs(y)      # update disregarding censored subjects
+        B.n_events_at_t[t] = $nobs   # update disregarding censored subjects
 
-        scalar q = 1 - B.n_events_at_t[t] / B.n_subjects
-
-        if t == 1
-            B.survival[t] = q
-        else
-            B.survival[t] = B.survival[t-1] * q
+        if t > 1
+            B.n_subjects_at_t[t] = B.n_subjects_at_t[t - 1] - \
+                                   B.n_events_at_t[t-1]
         endif
 
-        B.n_subjects -= $nobs
-        # FIXME: B.n_subjects -= B.n_events_at_t[t] FAILS
+        # conditional probability to survive at t given that no event has occurred yet
+        scalar q = 1 - B.n_events_at_t[t] / B.n_subjects_at_t[t]
+
+        B.survival[t] = q
+        if t > 1
+            B.survival[t] *= B.survival[t-1]
+        endif
     endloop
 
+    smpl full
+
     B.periods = {0} | B.periods
+    B.n_events_at_t = {0} | B.n_events_at_t
+    B.n_subjects_at_t = $nobs | B.n_subjects_at_t
     B.survival = {1} | B.survival
+
+
+    greenwood_variance(&B)
 
     return B
 end function
 
 
+function void greenwood_variance (bundle *self)
+    /* Variance of the Kaplan-Meier estimator using Greenwood's (1926) formula which is derived from a Taylor-approximation.
+    https://en.wikipedia.org/wiki/Kaplan%E2%80%93Meier_estimator#Statistical_considerations
+    return: scalar, Variance of the estimator */
+
+
+    scalar critval = invcdf(n, self.ci_level)
+    #log_S = log(self.survival)
+    self.variance = mshape(NA, rows(self.periods), 1)
+    self.lower = mshape(NA, rows(self.periods), 1)
+    self.upper = mshape(NA, rows(self.periods), 1)
+
+    scalar nominator = 0
+    scalar denominator = 0
+
+    loop t=1..rows(self.periods)
+        scalar nominator += self.n_events_at_t[t]
+        scalar denominator += self.n_subjects_at_t[t] * \
+                        (self.n_subjects_at_t[t] - self.n_events_at_t[t])
+
+        self.variance[t] =  nominator / denominator #* self.survival[t]^2
+
+        scalar factor = sqrt(self.variance[t]) * critval
+        self.lower[t] = self.survival[t] - factor
+        self.upper[t] = self.survival[t] + factor
+    endloop
+
+    # TODO: put into function
+    self.lower = self.lower .> 1 ? 1 : self.lower
+    self.lower = self.lower .< 0 ? 0 : self.lower
+    self.upper = self.upper .> 1 ? 1 : self.upper
+    self.upper = self.upper .< 0 ? 0 : self.upper
+
+    self.stderror = sqrt(self.variance)
+end function
+
+
+function void print_kaplanmeier (const bundle self)
+    /* Print estimation results.
+    return: void */
+
+    matrix M = self.periods ~ self.n_subjects_at_t ~ self.n_events_at_t ~ \
+    self.survival ~ self.stderror ~ self.lower ~ self.upper
+
+    scalar cilevel = self.ci_level * 100
+
+
+    strings colnames = defarray("Time",\
+                                "N(subjects)",\
+                                "N(Failed)",\
+                                "Probability",\
+                                "Std. Error",\
+                                sprintf("Low(%d pct.)", cilevel),\
+                                sprintf("Up(%d pct.)", cilevel))
+
+    cnameset(M, colnames)
+
+    printf "%16.5f", M
+end function
+
 
 function void plot_kaplanmeier (const bundle self,
-                                const bundle opts[null],
-                                string filename[null])
+                                const bundle opts[null])
     /* Plot Kaplan-Meier curves */
 
     # TODO: allow tweaking the plot
 
-    matrix M = self.survival ~ self.periods
+    matrix M = self.lower ~ self.survival ~ self.upper ~ self.periods
     string xname = "Time"
     string yname = "Survival probability"
-    string filename = exists(filename) ? filename : "output"
+    string filename = inbundle(opts, "filename") ? opts.filename : "output"
+
+    string title = sprintf("Kaplan-Meier survival function with %d pct. interval", 100*self.ci_level)
 
     plot M
            options with-steps fit=none
-           literal set linetype 1 lw 1.5 #lc rgb "green"
+           literal set linetype 1 lw 1.5 lc rgb "black" dt 2
+           literal set linetype 2 lw 1.5 lc rgb "red"
+           literal set linetype 3 lw 1.5 lc rgb "black" dt 2
            literal set nokey
-           # printf "set title \"%s\"", title
-           printf "set xlabel \"%s\"", xname
-           printf "set ylabel \"%s\"", yname
+           printf "set title \"%s\" font ',12'", title
+           printf "set xlabel \"%s\" font ',11'", xname
+           printf "set ylabel \"%s\" font ',11'", yname
            literal set grid
            literal set yrange[-0.05:1.05]
-           literal set xrange[-0.5:]
+           literal set xrange[-0.1:]
     end plot --output="@filename"
 end function
 

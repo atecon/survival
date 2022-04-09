@@ -2,9 +2,10 @@ clear
 set verbose off
 
 
-include "~/git/survival/src/survival.inp" --force
+set workdir "/home/at/git/survival"
+include "./src/survival.inp" --force
 
-EXAMPLE = 1
+EXAMPLE = 3
 
 if EXAMPLE == 1
     open kennan --quiet
@@ -14,10 +15,20 @@ elif EXAMPLE == 2
     nulldata 6
     series y = {1, 2, 3, 3, 5,7}'
     series censored = {0,0,0,0,1,0}'
+elif EXAMPLE == 3
+    open "./data/gehan.dta" --quiet
+    rename weeks y
+
+    GROUP = 1  # group == 1: control group (no censoring), == 2: treatment group
+
+    if GROUP == 1
+        series censored = 0
+    endif
+    smpl group == GROUP  --restrict --permanent
 endif
 
 bundle B = kaplanmeier(y, censored)
 B
-print B.survival[1:10]
 
-plot_kaplanmeier(B, null, "test.png")
+print_kaplanmeier(B)
+plot_kaplanmeier(B, _(filename="test.png"))
