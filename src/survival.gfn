@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gretl-functions>
+<gretl-function-package name="survival" minver="2022a" lives-in-subdir="true">
+<author email="atecon@posteo.de">Artur Tarassow</author>
+<version>0.1</version>
+<date>2022-04-10</date>
+<description>Event data analysis &amp; Kaplan-Meier estimator</description>
+<tags>C13 C52</tags>
+<help>
+This package is supposed to become a collection of methods applicable to event data. It currently includes the non-parametric Kaplan-Meier estimator.
+
+Please report bugs or comments on the gretl mailing list or write to atecon@posteo.de. You can also create pull requests to:
+https://github.com/atecon/survival
+
+
+
+================
+PUBLIC FUNCTIONS
+================
+
+kaplanmeier(const series y, const series censored, const bundle opts)
+==================================================================
+Function executing the Kaplan-Meier estimator. The variance is computed via Greenwood's (1926) approximation.
+
+Input parameters
+    y:            series, Endogenous holding observed survival times
+    censored:     series, Boolean being unity if the i-th subject was right
+                  censored, otherwise zero
+    opts:         bundle, Pass user-specific options. Currently supported:
+                  - ci_level: scalar, width of the confidence interval
+                             between 0 and 1 (default: 0.95)
+
+
+Return: Bundle holding various information:
+
+    ci_level:        scalar, width of the confidence interval (default: 0.95)
+    lower:           matrix, Tx1 vector of the lower bound confidence interval
+    n_events:        matrix, Tx1 vector referring to the number of failed
+                     subjects (after removing censored ones) at time t
+    n_subjects:      matrix, Tx1 vector referring to the number of subjects at
+                     risk (after removing censored ones) at time t
+    periods:         matrix, Tx1 vector of sorted distinct periods each
+                     referring to time t
+    stderror:        matrix, Tx1 vector of estimated standard errors of the
+                     survivor function at time t
+    survival:        matrix, Tx1 vector of estimated survival probabilities at
+    upper:           matrix, Tx1 vector of the upper bound confidence interval
+    variance:        matrix, Tx1 vector of estimated variance at time t
+
+
+print_kaplanmeier(const bundle model)
+==================================================================
+Print estimation results for each time period t.
+
+Input parameters
+    model:        bundle, Bundle holding estimation results as returned by the
+                  kaplanmeier() function call
+
+Return: Nothing
+
+
+plot_kaplanmeier(const bundle model, const bundle opts)
+==================================================================
+Print estimation results for each time period t.
+
+Input parameters
+    model:        bundle, Bundle holding estimation results as returned by the
+                  kaplanmeier() function call
+    opts:         bundle, Optional arguments passed for tweaking or storing the
+                  compiled plot. The supported arguments currently are:
+                  - filename: Specify full path plus filename for storing plot
+
+Return: Nothing
+
+
+Changelog:
+==========
+v0.1 (April 2022):
+  - initial version
+</help>
+<data-files count="1">
+gehan.gdt </data-files>
+<gretl-function name="kaplanmeier" type="bundle">
+ <params count="3">
+  <param name="y" type="series">
+<description>survival time</description>
+  </param>
+  <param name="censored" type="series">
+<description>0: not censored, 1: right-censored</description>
+  </param>
+  <param name="self" type="bundle" optional="true" const="true">
+<description>Optional settings</description>
+  </param>
+ </params>
+<code>/* Kaplan-Meier estimator */
+genr index
+list L = index y censored
+smpl L --no-missing
+# TODO: merge B and self
+bundle B = get_basics(y)
+if exists(self)
+  B = self + B
+endif
+errorif(B.ci_level &lt;= 0 || B.ci_level &gt;= 1, &quot;Parameter 'ci_level' must be between 0 and 1.&quot;)
+list L = sort_by(L, inlist(L, y))
+loop t=1..nelem(B.periods)
+  smpl y == B.periods[t] --restrict --replace
+  B.n_events[t] = nobs(y)
+  # Check whether at t all subjects are censored
+  scalar n_censored = sum(censored)
+  scalar all_censored = (n_censored == B.n_events[t])
+  if all_censored
+    # Do not count censored subjects anymore
+    B.n_subjects[t] -= B.n_events[t]
+    B.survival[t] = B.survival[t-1]
+    B.n_events[t] = 0
+    continue   # TODO: requires gretl 2022b
+  endif
+  smpl censored == FALSE --restrict  # disregard censored subjects
+  B.n_events[t] = $nobs   # update disregarding censored subjects
+  if t &gt; 1
+    B.n_subjects[t] = B.n_subjects[t - 1] - B.n_events[t-1]
+  endif
+  # conditional probability to survive at t given that no event has occurred yet
+  scalar q = 1 - B.n_events[t] / B.n_subjects[t]
+  B.survival[t] = q
+  if t &gt; 1
+    B.survival[t] *= B.survival[t-1]
+  endif
+endloop
+smpl full
+B.periods = {0} | B.periods
+B.n_events = {0} | B.n_events
+B.n_subjects = $nobs | B.n_subjects
+B.survival = {1} | B.survival
+greenwood_variance(&amp;B)
+return B
+</code>
+</gretl-function>
+<gretl-function name="print_kaplanmeier" type="void">
+ <params count="1">
+  <param name="self" type="bundle" const="true"/>
+ </params>
+<code>/* Print estimation results.
+return: void */
+matrix M = self.periods ~ self.n_subjects ~ self.n_events ~ self.survival ~ self.stderror ~ self.lower ~ self.upper
+scalar cilevel = self.ci_level * 100
+strings colnames = defarray(&quot;Time&quot;, &quot;N(subjects)&quot;, &quot;N(Failed)&quot;, &quot;Probability&quot;, &quot;Std. Error&quot;, sprintf(&quot;Low(%d pct.)&quot;, cilevel), sprintf(&quot;Up(%d pct.)&quot;, cilevel))
+cnameset(M, colnames)
+printf &quot;%16.5f&quot;, M
+</code>
+</gretl-function>
+<gretl-function name="plot_kaplanmeier" type="void">
+ <params count="2">
+  <param name="self" type="bundle"/>
+  <param name="opts" type="bundle" optional="true" const="true"/>
+ </params>
+<code>/* Plot Kaplan-Meier curves */
+# TODO: allow tweaking the plot
+self = exists(opts) ? (opts + self) : self
+matrix M = self.lower ~ self.survival ~ self.upper ~ self.periods
+string xname = &quot;Time&quot;
+string yname = &quot;Survival probability&quot;
+string filename = self.filename
+string title = get_title_km_plot(self.ci_level)
+plot M
+  options with-steps fit=none
+  literal set linetype 1 lw 1.5 lc rgb &quot;black&quot; dt 2
+  literal set linetype 2 lw 1.5 lc rgb &quot;red&quot;
+  literal set linetype 3 lw 1.5 lc rgb &quot;black&quot; dt 2
+  literal set nokey
+  printf &quot;set title \&quot;%s\&quot; font ',12'&quot;, title
+  printf &quot;set xlabel \&quot;%s\&quot; font ',11'&quot;, xname
+  printf &quot;set ylabel \&quot;%s\&quot; font ',11'&quot;, yname
+  literal set grid
+  literal set yrange[-0.05:1.05]
+  literal set xrange[-0.1:]
+end plot --output=&quot;@filename&quot;
+</code>
+</gretl-function>
+<gretl-function name="sort_by" type="list" private="1">
+ <params count="2">
+  <param name="L" type="list" const="true"/>
+  <param name="colpos" type="int" min="1" const="true"/>
+ </params>
+<code>/* Sort 'L' by 'colpos'.
+return: list, Series sorted by the i-th series of 'L' in ascending order */
+list R
+matrix M = {L}
+M = msortby(M, colpos)
+cnameset(M, varnames(L))
+list R = mat2list(M)
+return R
+</code>
+</gretl-function>
+<gretl-function name="get_basics" type="bundle" private="1">
+ <params count="1">
+  <param name="y" type="series" const="true"/>
+ </params>
+<code>/* Prepare basic bundle. */
+bundle self
+scalar self.ci_level = 0.95          # width confidence interval
+matrix self.periods = values(y) # Distinct time points at which are events
+# estimate of survival prob. at time t+0
+matrix self.survival = mshape(NA, nelem(self.periods), 1)
+# the number of events that occur at time t
+matrix self.n_events = mshape(NA, nelem(self.periods), 1)
+# number of subjects for each group at time t
+matrix self.n_subjects = nobs(y) | mshape(NA, nelem(self.periods) - 1, 1)
+string self.filename = &quot;display&quot;  # for plot function only
+return self
+</code>
+</gretl-function>
+<gretl-function name="greenwood_variance" type="void" private="1">
+ <params count="1">
+  <param name="self" type="bundleref"/>
+ </params>
+<code>/* Variance of the Kaplan-Meier estimator using Greenwood's (1926) formula which is derived from a Taylor-approximation.
+https://en.wikipedia.org/wiki/Kaplan%E2%80%93Meier_estimator#Statistical_considerations
+return: scalar, Variance of the estimator */
+scalar critval = invcdf(n, self.ci_level)
+self.variance = mshape(NA, rows(self.periods), 1)
+self.lower = mshape(NA, rows(self.periods), 1)
+self.upper = mshape(NA, rows(self.periods), 1)
+scalar nominator = 0
+scalar denominator = 0
+loop t=1..rows(self.periods)
+  scalar nominator += self.n_events[t]
+  scalar denominator += self.n_subjects[t] * (self.n_subjects[t] - self.n_events[t])
+  # TODO: Not fully sure about that formula -- looks to work without
+  # multiplication of &quot;self.survival[t]^2&quot;
+  self.variance[t] =  nominator / denominator #* self.survival[t]^2
+  scalar factor = sqrt(self.variance[t]) * critval
+  self.lower[t] = self.survival[t] - factor
+  self.upper[t] = self.survival[t] + factor
+endloop
+self.lower = censor_cibounds(self.lower)
+self.upper = censor_cibounds(self.upper)
+self.stderror = sqrt(self.variance)
+</code>
+</gretl-function>
+<gretl-function name="censor_cibounds" type="matrix" private="1">
+ <params count="1">
+  <param name="m" type="matrix"/>
+ </params>
+<code>/* Make sure values are between zero an 1.
+return: matrix, Censored values between 0 and 1.  */
+m = m .&gt; 1 ? 1 : m
+m = m .&lt; 0 ? 0 : m
+return m
+</code>
+</gretl-function>
+<gretl-function name="get_title_km_plot" type="string" private="1">
+ <params count="1">
+  <param name="ci_level" type="scalar" const="true"/>
+ </params>
+<code>/* Compile the title string for the plot of the survival function. */
+return sprintf(&quot;Kaplan-Meier survival function with %d pct. interval&quot;, 100*ci_level)
+</code>
+</gretl-function>
+<sample-script>
+clear
+set verbose off
+
+include survival.gfn
+
+EXAMPLE = 2
+
+if EXAMPLE == 1
+    open kennan --quiet
+    rename Ti y
+    series censored = 0
+
+elif EXAMPLE == 2
+    # Replicate STATA results: https://data.princeton.edu/eco572/kaplanmeier
+    open gehan.gdt --frompkg=survival
+    # info -- print information on dataset
+    rename weeks y
+
+    series censored = 0  # none of the obs. is censored
+    # group == 1: control group (no censoring), == 2: treatment group
+    smpl group == 1  --restrict --permanent
+endif
+
+
+# Call the estimator
+bundle B = kaplanmeier(y, censored)
+
+# Optionally: change the width of the confidence interval
+bundle opts = _(ci_level = 0.66)
+bundle B = kaplanmeier(y, censored, opts)
+
+# Show the returned bundle elements
+print B
+
+# Print estimation results
+print_kaplanmeier(B)
+
+# Plot survival function
+plot_kaplanmeier(B)
+#plot_kaplanmeier(B, _(filename=&quot;kaplan_meier.png&quot;)) # store plot alternatively
+</sample-script>
+</gretl-function-package>
+</gretl-functions>
