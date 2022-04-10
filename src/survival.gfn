@@ -5,7 +5,7 @@
 <version>0.1</version>
 <date>2022-04-10</date>
 <description>Event data analysis &amp; Kaplan-Meier estimator</description>
-<tags>C13 C52</tags>
+<tags>C14 C41</tags>
 <help>
 This package is supposed to become a collection of methods applicable to event data. It currently includes the non-parametric Kaplan-Meier estimator.
 
