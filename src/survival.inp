@@ -23,9 +23,10 @@ function bundle get_basics (const series y)
     # estimate of survival prob. at time t+0
     matrix self.survival = mshape(NA, nelem(self.periods), 1)
     # the number of events that occur at time t
-    matrix self.n_events_at_t = mshape(NA, nelem(self.periods), 1)
+    matrix self.n_events = mshape(NA, nelem(self.periods), 1)
     # number of subjects for each group at time t
-    matrix self.n_subjects_at_t = nobs(y) | mshape(NA, nelem(self.periods) - 1, 1)
+    matrix self.n_subjects = nobs(y) | mshape(NA, nelem(self.periods) - 1, 1)
+    string self.filename = "display"  # for plot function only
 
     return self
 end function
@@ -33,7 +34,6 @@ end function
 
 function bundle kaplanmeier (series y "survival time",
                              series censored "0: not censored, 1: right-censored",
-                             const series group[null] "Identifier for estimation by group",
                              const bundle self[null] "Optional settings")
     /* Kaplan-Meier estimator */
 
@@ -41,37 +41,44 @@ function bundle kaplanmeier (series y "survival time",
     list L = index y censored
     smpl L --no-missing
 
-
     # TODO: merge B and self
     bundle B = get_basics(y)
+
+    if exists(self)
+        B = self + B
+    endif
+
+    errorif(B.ci_level <= 0 || B.ci_level >= 1,\
+            "Parameter 'ci_level' must be between 0 and 1.")
+
     list L = sort_by(L, inlist(L, y))
 
     loop t=1..nelem(B.periods)
         smpl y == B.periods[t] --restrict --replace
-        B.n_events_at_t[t] = nobs(y)
+        B.n_events[t] = nobs(y)
 
         # Check whether at t all subjects are censored
         scalar n_censored = sum(censored)
-        scalar all_censored = (n_censored == B.n_events_at_t[t])
+        scalar all_censored = (n_censored == B.n_events[t])
 
         if all_censored
             # Do not count censored subjects anymore
-            B.n_subjects_at_t[t] -= B.n_events_at_t[t]
+            B.n_subjects[t] -= B.n_events[t]
             B.survival[t] = B.survival[t-1]
-            B.n_events_at_t[t] = 0
+            B.n_events[t] = 0
             continue   # TODO: requires gretl 2022b
         endif
 
         smpl censored == FALSE --restrict  # disregard censored subjects
-        B.n_events_at_t[t] = $nobs   # update disregarding censored subjects
+        B.n_events[t] = $nobs   # update disregarding censored subjects
 
         if t > 1
-            B.n_subjects_at_t[t] = B.n_subjects_at_t[t - 1] - \
-                                   B.n_events_at_t[t-1]
+            B.n_subjects[t] = B.n_subjects[t - 1] - \
+                                   B.n_events[t-1]
         endif
 
         # conditional probability to survive at t given that no event has occurred yet
-        scalar q = 1 - B.n_events_at_t[t] / B.n_subjects_at_t[t]
+        scalar q = 1 - B.n_events[t] / B.n_subjects[t]
 
         B.survival[t] = q
         if t > 1
@@ -82,8 +89,8 @@ function bundle kaplanmeier (series y "survival time",
     smpl full
 
     B.periods = {0} | B.periods
-    B.n_events_at_t = {0} | B.n_events_at_t
-    B.n_subjects_at_t = $nobs | B.n_subjects_at_t
+    B.n_events = {0} | B.n_events
+    B.n_subjects = $nobs | B.n_subjects
     B.survival = {1} | B.survival
     greenwood_variance(&B)
 
@@ -105,9 +112,9 @@ function void greenwood_variance (bundle *self)
     scalar denominator = 0
 
     loop t=1..rows(self.periods)
-        scalar nominator += self.n_events_at_t[t]
-        scalar denominator += self.n_subjects_at_t[t] * \
-                        (self.n_subjects_at_t[t] - self.n_events_at_t[t])
+        scalar nominator += self.n_events[t]
+        scalar denominator += self.n_subjects[t] * \
+                        (self.n_subjects[t] - self.n_events[t])
 
         # TODO: Not fully sure about that formula -- looks to work without
         # multiplication of "self.survival[t]^2"
@@ -118,13 +125,20 @@ function void greenwood_variance (bundle *self)
         self.upper[t] = self.survival[t] + factor
     endloop
 
-    # TODO: put into function
-    self.lower = self.lower .> 1 ? 1 : self.lower
-    self.lower = self.lower .< 0 ? 0 : self.lower
-    self.upper = self.upper .> 1 ? 1 : self.upper
-    self.upper = self.upper .< 0 ? 0 : self.upper
-
+    self.lower = censor_cibounds(self.lower)
+    self.upper = censor_cibounds(self.upper)
     self.stderror = sqrt(self.variance)
+end function
+
+
+function matrix censor_cibounds (matrix m)
+    /* Make sure values are between zero an 1.
+    return: matrix, Censored values between 0 and 1.  */
+
+    m = m .> 1 ? 1 : m
+    m = m .< 0 ? 0 : m
+
+    return m
 end function
 
 
@@ -132,7 +146,7 @@ function void print_kaplanmeier (const bundle self)
     /* Print estimation results.
     return: void */
 
-    matrix M = self.periods ~ self.n_subjects_at_t ~ self.n_events_at_t ~ \
+    matrix M = self.periods ~ self.n_subjects ~ self.n_events ~ \
     self.survival ~ self.stderror ~ self.lower ~ self.upper
 
     scalar cilevel = self.ci_level * 100
@@ -152,18 +166,18 @@ function void print_kaplanmeier (const bundle self)
 end function
 
 
-function void plot_kaplanmeier (const bundle self,
+function void plot_kaplanmeier (bundle self,
                                 const bundle opts[null])
     /* Plot Kaplan-Meier curves */
 
     # TODO: allow tweaking the plot
 
+    self = exists(opts) ? (opts + self) : self
     matrix M = self.lower ~ self.survival ~ self.upper ~ self.periods
     string xname = "Time"
     string yname = "Survival probability"
-    string filename = inbundle(opts, "filename") ? opts.filename : "output"
-
-    string title = sprintf("Kaplan-Meier survival function with %d pct. interval", 100*self.ci_level)
+    string filename = self.filename
+    string title = get_title_km_plot(self.ci_level)
 
     plot M
            options with-steps fit=none
@@ -181,6 +195,9 @@ function void plot_kaplanmeier (const bundle self,
 end function
 
 
+function string get_title_km_plot (const scalar ci_level)
+    /* Compile the title string for the plot of the survival function. */
 
-
-
+    return sprintf("Kaplan-Meier survival function with %d pct. interval",\
+                   100*ci_level)
+end function

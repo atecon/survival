@@ -7,7 +7,85 @@ include assertion.gfn
 include "./src/survival.inp" --force
 
 
+open "./data/gehan.gdt" --quiet
+smpl group == 1  --restrict --permanent
 
+function void test_replicate_stata (const list L)
+    print "Replicate stata results obtained from"
+    print "https://data.princeton.edu/eco572/kaplanmeier"
+
+    /*
+    <STATA>
+    . sts list, by(group)
+
+         failure _d:  relapse
+   analysis time _t:  weeks
+
+           Beg.          Net            Survivor      Std.
+  Time    Total   Fail   Lost           Function     Error     [95% Conf. Int.]
+-------------------------------------------------------------------------------
+control
+     1       21      2      0             0.9048    0.0641     0.6700    0.9753
+     2       19      2      0             0.8095    0.0857     0.5689    0.9239
+     3       17      1      0             0.7619    0.0929     0.5194    0.8933
+     4       16      2      0             0.6667    0.1029     0.4254    0.8250
+     5       14      2      0             0.5714    0.1080     0.3380    0.7492
+     8       12      4      0             0.3810    0.1060     0.1831    0.5778
+    11        8      2      0             0.2857    0.0986     0.1166    0.4818
+    12        6      2      0             0.1905    0.0857     0.0595    0.3774
+    15        4      1      0             0.1429    0.0764     0.0357    0.3212
+    17        3      1      0             0.0952    0.0641     0.0163    0.2612
+    22        2      1      0             0.0476    0.0465     0.0033    0.1970
+    23        1      1      0             0.0000         .          .         .
+    </STATA>
+    */
+
+    # Given
+    series censored = 0
+    matrix expected_periods = {0, 1, 2, 3, 4, 5, 8, 11, 12, 15, 17, 22, 23}'
+    matrix expected_n_subjects = {21, 21, 19, 17, 16, 14, 12, 8, 6,\
+                                       4, 3, 2, 1}'
+    matrix expected_n_events = {0, 2, 2, 1, 2, 2, 4, 2, 2, 1, 1, 1, 1}'
+    matrix expected_survival = {1, 0.9048, 0.8095, 0.7619, 0.6667, 0.5714,\
+                                0.3810, 0.2857, 0.1905, 0.1429, 0.0952,\
+                                0.0476, 0.0000}'
+
+    # When
+    bundle Actual = kaplanmeier(L.weeks, censored)
+
+    # Then
+    scalar bhat = mols(Actual.periods, expected_periods)
+    assert_almost_equal_num(bhat, 1, 10e-15)
+    scalar bhat = mols(Actual.n_subjects, expected_n_subjects)
+    assert_almost_equal_num(bhat, 1, 10e-15)
+    scalar bhat = mols(Actual.n_events , expected_n_events)
+    assert_almost_equal_num(bhat, 1, 10e-15)
+    scalar bhat = mols(Actual.survival , expected_survival)
+    assert_almost_equal_num(bhat, 0.99, 10e-3)
+end function
+test_replicate_stata(dataset)
+
+
+
+bundles Params = null
+Params = Params + _(input = {-0.1, 0, 0.99, 1.01}',\
+                    expected = {0, 0, 0.99, 1}')
+
+function void test_censor_cibounds (const bundles P)
+    print "Start testing function name()."
+
+    loop foreach i P
+        # Given
+        eval P[i]
+        # When
+        matrix actual = censor_cibounds(P[i].input)
+
+        # Then
+        scalar bhat = mols(actual, P[i].expected)
+        assert_almost_equal_num(bhat, 1, 10e-15)
+    endloop
+end function
+test_censor_cibounds(Params)
 
 
 

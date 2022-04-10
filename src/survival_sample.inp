@@ -1,34 +1,42 @@
 clear
 set verbose off
 
+include survival.gfn
 
-set workdir "/home/at/git/survival"
-include "./src/survival.inp" --force
-
-EXAMPLE = 3
+EXAMPLE = 2
 
 if EXAMPLE == 1
     open kennan --quiet
     rename Ti y
     series censored = 0
+
 elif EXAMPLE == 2
-    nulldata 6
-    series y = {1, 2, 3, 3, 5,7}'
-    series censored = {0,0,0,0,1,0}'
-elif EXAMPLE == 3
-    open "./data/gehan.dta" --quiet
+    # Replicate STATA results: https://data.princeton.edu/eco572/kaplanmeier
+    open gehan.gdt --frompkg=survival
+    # info -- print information on dataset
     rename weeks y
 
-    GROUP = 1  # group == 1: control group (no censoring), == 2: treatment group
-
-    if GROUP == 1
-        series censored = 0
-    endif
-    smpl group == GROUP  --restrict --permanent
+    series censored = 0  # none of the obs. is censored
+    # group == 1: control group (no censoring), == 2: treatment group
+    smpl group == 1  --restrict --permanent
 endif
 
-bundle B = kaplanmeier(y, censored)
-B
 
+# Call the estimator
+bundle B = kaplanmeier(y, censored)
+
+# Optionally: change the width of the confidence interval
+bundle opts = _(ci_level = 0.66)
+bundle B = kaplanmeier(y, censored, opts)
+
+# Show the returned bundle elements
+print B
+
+# Print estimation results
 print_kaplanmeier(B)
-plot_kaplanmeier(B, _(filename="test.png"))
+
+# Plot survival function
+plot_kaplanmeier(B)
+#plot_kaplanmeier(B, _(filename="kaplan_meier.png")) # store plot alternatively
+
+

@@ -1,4 +1,4 @@
-This package is supposed to become a collection of methods applicable to survival data. It currently includes the non-parametric Kaplan-Meier estimator.
+This package is supposed to become a collection of methods applicable to event data. It currently includes the non-parametric Kaplan-Meier estimator.
 
 Please report bugs or comments on the gretl mailing list or write to atecon@posteo.de. You can also create pull requests to:
 https://github.com/atecon/survival
@@ -9,32 +9,34 @@ https://github.com/atecon/survival
 PUBLIC FUNCTIONS
 ================
 
-kaplanmeier(const series y, const series censored)
+kaplanmeier(const series y, const series censored, const bundle opts)
 ==================================================================
 Function executing the Kaplan-Meier estimator. The variance is computed via Greenwood's (1926) approximation.
 
 Input parameters
     y:            series, Endogenous holding observed survival times
-    censored:     series, Boolean being unity if i-th subject was right
+    censored:     series, Boolean being unity if the i-th subject was right
                   censored, otherwise zero
+    opts:         bundle, Pass user-specific options. Currently supported:
+                  - ci_level: scalar, width of the confidence interval
+                             between 0 and 1 (default: 0.95)
 
 
 Return: Bundle holding various information:
 
-    ci_level:        scalar, width of the confidence interval
+    ci_level:        scalar, width of the confidence interval (default: 0.95)
     lower:           matrix, Tx1 vector of the lower bound confidence interval
-                     to either an event (failed subjects) or censoring
-    n_events_at_t:   matrix, Tx1 vector referring to the number of failed
-                     subjects (without censored ones) at time t
-    n_subjects_at_t: matrix, Tx1 vector referring to the number of subjects at
-                     risk (after censoring) at time t
+    n_events:        matrix, Tx1 vector referring to the number of failed
+                     subjects (after removing censored ones) at time t
+    n_subjects:      matrix, Tx1 vector referring to the number of subjects at
+                     risk (after removing censored ones) at time t
     periods:         matrix, Tx1 vector of sorted distinct periods each
-                     referring time t
-    stderror:        matrix, Tx1 vector of estimated standard error of the
+                     referring to time t
+    stderror:        matrix, Tx1 vector of estimated standard errors of the
                      survivor function at time t
     survival:        matrix, Tx1 vector of estimated survival probabilities at
     upper:           matrix, Tx1 vector of the upper bound confidence interval
-    variance:        matrix, Tx1 vector of estimated standard variance at time t
+    variance:        matrix, Tx1 vector of estimated variance at time t
 
 
 print_kaplanmeier(const bundle model)
